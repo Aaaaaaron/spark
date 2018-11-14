@@ -253,7 +253,18 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
     }
     columnarBatch.setNumRows(0);
     if (rowsReturned >= totalRowCount) return false;
-    checkEndOfRowGroup();
+
+    if ("true".equals(System.getProperty("v1"))) {
+      if (checkEndOfRowGroupV1()) {
+        return false;
+      }
+    } else if ("true".equals(System.getProperty("v2"))) {
+      if (checkEndOfRowGroupV2()) {
+        return false;
+      }
+    } else {
+      checkEndOfRowGroup();
+    }
 
     int num = (int) Math.min((long) capacity, totalCountLoadedSoFar - rowsReturned);
     for (int i = 0; i < columnReaders.length; ++i) {
@@ -312,5 +323,41 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
         pages.getPageReader(columns.get(i)), convertTz);
     }
     totalCountLoadedSoFar += pages.getRowCount();
+  }
+
+  private boolean checkEndOfRowGroupV1() throws IOException {
+    if (rowsReturned != totalCountLoadedSoFar) return false;
+    PageReadStore pages = reader.readNextFilteredRowGroup();
+    if (pages == null) {
+      return true;
+    }
+    List<ColumnDescriptor> columns = requestedSchema.getColumns();
+    List<Type> types = requestedSchema.asGroupType().getFields();
+    columnReaders = new VectorizedColumnReader[columns.size()];
+    for (int i = 0; i < columns.size(); ++i) {
+      if (missingColumns[i]) continue;
+      columnReaders[i] = new VectorizedColumnReader(columns.get(i), types.get(i).getOriginalType(),
+              pages.getPageReader(columns.get(i)), convertTz);
+    }
+    totalCountLoadedSoFar += pages.getRowCount();
+    return false;
+  }
+
+  private boolean checkEndOfRowGroupV2() throws IOException {
+    if (rowsReturned != totalCountLoadedSoFar) return false;
+    PageReadStore pages = reader.readNextFilteredRowGroup2();
+    if (pages == null) {
+      return true;
+    }
+    List<ColumnDescriptor> columns = requestedSchema.getColumns();
+    List<Type> types = requestedSchema.asGroupType().getFields();
+    columnReaders = new VectorizedColumnReader[columns.size()];
+    for (int i = 0; i < columns.size(); ++i) {
+      if (missingColumns[i]) continue;
+      columnReaders[i] = new VectorizedColumnReader(columns.get(i), types.get(i).getOriginalType(),
+              pages.getPageReader(columns.get(i)), convertTz);
+    }
+    totalCountLoadedSoFar += pages.getRowCount();
+    return false;
   }
 }
